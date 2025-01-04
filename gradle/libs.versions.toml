@@ -14,13 +14,15 @@ ssh = "2.10.1"
 shadow = "7.0.0"
 
 wdater = "0.0.4"
-meetacyDi = "0.0.25"
+meetacyDi = "0.0.38"
 
 [libraries]
 
 ## wdater
 meetacy-wdater-core = { module = "app.meetacy.wdater:wdater", version.ref = "wdater" }
 meetacy-wdater-autoMigrations = { module = "app.meetacy.wdater:auto-migrations", version.ref = "wdater" }
+
+meetacy-di-core = { module = "app.meetacy.di:core", version.ref = "meetacyDi" }
 
 # kotlinx libs
 
