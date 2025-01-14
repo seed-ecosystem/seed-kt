@@ -10,9 +10,9 @@ import org.jetbrains.exposed.sql.transactions.transaction
 class MessageTable(private val db: Database) : Table() {
     private val NONCE = long("NONCE").autoIncrement()
     private val CHAT_ID = varchar("CHAT_ID", 344)
-    private val SIGNATURE = varchar("AUTHOR_FIRSTNAME", 344)
-    private val CONTENT = varchar("AUTHOR_USERNAME", 16384)
-    private val CONTENT_IV = varchar("RESPOND_DATE", 16)
+    private val SIGNATURE = varchar("SIGNATURE", 344)
+    private val CONTENT = varchar("CONTENT", 16384)
+    private val CONTENT_IV = varchar("CONTENT_IV", 16)
 
     init {
         transaction(db) {
@@ -33,7 +33,7 @@ class MessageTable(private val db: Database) : Table() {
 
     suspend fun getLastNonce(chatId: String) =
         newSuspendedTransaction(Dispatchers.IO, db) {
-            select { (CHAT_ID eq chatId) }.lastOrNull()?.get(NONCE) ?: 0
+            select { (CHAT_ID eq chatId) }.lastOrNull()?.get(NONCE)
         }
 
 }

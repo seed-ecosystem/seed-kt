@@ -1,7 +1,8 @@
 package app.seed.backend
 
-import MessageTable
-import MessagesRepositoryImpl
+import ChatService
+import EventBus
+import SubscriptionHandler
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.cio.*
@@ -30,6 +31,9 @@ suspend fun main(): Unit = coroutineScope {
         user = databaseUser,
         password = databasePassword
     )
+    val chatService = ChatService() // Сервис управления чатами
+    val subscriptionHandler = SubscriptionHandler(chatService) // Подписки
+    val eventBus = EventBus(chatService, subscriptionHandler)
 
     val server = this.embeddedServer(CIO, host = "localhost", port = port){
         installJson()
@@ -46,12 +50,7 @@ suspend fun main(): Unit = coroutineScope {
         routing {
             staticResources("/", null)
             
-            messageStream(
-                MessagesRepositoryImpl(MessageTable(db))
-            )
-            get("/duntsova") {
-                call.respondRedirect("https://дунцова.рф")
-            }
+            messageStream(eventBus)
         }
     }
     server.start(wait = true)
