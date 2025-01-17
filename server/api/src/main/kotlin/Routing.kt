@@ -2,8 +2,6 @@ import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.util.concurrent.ConcurrentHashMap
@@ -19,53 +17,93 @@ data class Request(val type: String, val chatId: String? = null, val message: Me
 @Serializable
 data class Response(val type: String, val status: Boolean)
 
+interface MessagesRepository {
+    suspend fun sendMessage(message: Message): Response
+    suspend fun getMessagesByChatId(chatId: String): List<Message>
+}
+
 val json = Json { ignoreUnknownKeys = true }
 
-class ChatService {
-    data class ChatData(val messages: MutableList<Message>, var nonce: Int)
-    private val chats = ConcurrentHashMap<String, ChatData>()
-
-    fun addMessage(chatId: String, message: Message) {
-        val chat = chats.computeIfAbsent(chatId) { ChatData(mutableListOf(), 0) }
-        chat.messages.add(message)
-        chat.nonce++
+class ChatService(private val messagesRepository: MessagesRepository) {
+    suspend fun addMessage(message: Message) {
+        val response = messagesRepository.sendMessage(message)
+        if (response.status) {
+            subscriptions[message.chatId]?.forEach { it.send(json.encodeToString(message)) }
+        } else {
+            session.send(
+                Frame.Text(
+                    json.encodeToString(
+                        EventResponseSerialization.serializer(),
+                        EventResponseSerialization("event", EventSerialization("error", response.message))
+                    )
+                )
+            )
+        }
     }
 
-    fun getChatData(chatId: String): ChatData? = chats[chatId]
+    suspend fun getChatData(chatId: String): List<Message> {
+
+        return messagesRepository.getMessagesByChatId(chatId)
+    }
 }
 
 class SubscriptionHandler(private val chatService: ChatService) {
     private val subscriptions = ConcurrentHashMap<String, MutableSet<DefaultWebSocketServerSession>>()
 
     suspend fun subscribe(session: DefaultWebSocketServerSession, chatId: String, nonce: Int) {
-        val chat = chatService.getChatData(chatId) ?: ChatService.ChatData(mutableListOf(), 0)
 
+        val messages = chatService.getChatData(chatId)
+        
         subscriptions.computeIfAbsent(chatId) { mutableSetOf() }.add(session)
+        if (!messages.isEmpty()) {
 
-        if (nonce >= chat.nonce) {
-            session.send(Frame.Text(json.encodeToString(
-                EventResponseSerialization.serializer(), 
-                EventResponseSerialization("event", EventSerialization("wait", chatId))))
-            )
-        } else {
-            val missingMessages = chat.messages.subList(nonce, chat.nonce)
-            missingMessages.forEach { message ->
-                val eventResponse = EventResponseSerialization("event", EventSerialization("new", message.chatId, message))
-                session.send(Frame.Text(json.encodeToString(EventResponseSerialization.serializer(), eventResponse)))
+            if (nonce >= messages.last().nonce) {
+                session.send(
+                    Frame.Text(
+                        json.encodeToString(
+                            EventResponseSerialization.serializer(),
+                            EventResponseSerialization("event", EventSerialization("wait", chatId))
+                        )
+                    )
+                )
+            } else {
+                val missingMessages = messages.drop(nonce)
+                missingMessages.forEach { message ->
+                    val eventResponse = EventResponseSerialization(
+                        "event",
+                        EventSerialization("new", message.chatId, message)
+                    )
+                    session.send(
+                        Frame.Text(
+                            json.encodeToString(
+                                EventResponseSerialization.serializer(),
+                                eventResponse
+                            )
+                        )
+                    )
+                }
             }
+        } else {
+            session.send(
+                Frame.Text(
+                    json.encodeToString(
+                        EventResponseSerialization.serializer(),
+                        EventResponseSerialization("event", EventSerialization("wait", chatId))
+                    )
+                )
+            )
         }
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    fun notifySubscribers(chatId: String, message: Message) {
+    suspend fun notifySubscribers(chatId: String, message: Message) {
+
         subscriptions[chatId]?.forEach { session ->
-            GlobalScope.launch {
-                val eventResponse = EventResponseSerialization(
-                    "event", 
-                    EventSerialization("new", message.chatId, message)
-                )
-                session.send(Frame.Text(json.encodeToString(EventResponseSerialization.serializer(), eventResponse)))
-            }
+            val eventResponse = EventResponseSerialization(
+                "event",
+                EventSerialization("new", message.chatId, message)
+            )
+            session.send(Frame.Text(json.encodeToString(EventResponseSerialization.serializer(), eventResponse)))
         }
     }
 }
@@ -74,7 +112,7 @@ class EventBus(private val chatService: ChatService, private val subscriptionHan
     suspend fun handleEvent(event: Event, session: DefaultWebSocketServerSession) {
         when (event) {
             is SendEvent -> {
-                chatService.addMessage(event.chatId, event.message)
+                chatService.addMessage(event.message)
                 val response = Response("response", status = true)
                 session.send(Frame.Text(json.encodeToString(Response.serializer(), response)))
                 subscriptionHandler.notifySubscribers(event.chatId, event.message)
@@ -120,6 +158,6 @@ fun Route.messageStream(eventBus: EventBus) = webSocket("/") {
             }
         }
     } catch (e: Exception) {
-        println("WebSocket error: ${e.message}")
+        println("WebSocket error: ${e.message} ${e}")
     }
 }

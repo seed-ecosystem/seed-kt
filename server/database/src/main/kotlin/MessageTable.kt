@@ -36,4 +36,17 @@ class MessageTable(private val db: Database) : Table() {
             select { (CHAT_ID eq chatId) }.lastOrNull()?.get(NONCE)
         }
 
+    suspend fun getMessagesByChatId(chatId: String): List<Message> =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            select { (CHAT_ID eq chatId) }
+                .map {
+                    Message(
+                        nonce = it[NONCE],
+                        chatId = it[CHAT_ID],
+                        signature = it[SIGNATURE],
+                        content = it[CONTENT],
+                        contentIV = it[CONTENT_IV]
+                    )
+                }
+        }
 }

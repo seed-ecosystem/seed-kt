@@ -2,6 +2,8 @@ package app.seed.backend
 
 import ChatService
 import EventBus
+import MessageTable
+import MessagesRepositoryImpl
 import SubscriptionHandler
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -31,7 +33,7 @@ suspend fun main(): Unit = coroutineScope {
         user = databaseUser,
         password = databasePassword
     )
-    val chatService = ChatService() // Сервис управления чатами
+    val chatService = ChatService(MessagesRepositoryImpl(MessageTable(db))) // Сервис управления чатами
     val subscriptionHandler = SubscriptionHandler(chatService) // Подписки
     val eventBus = EventBus(chatService, subscriptionHandler)
 
