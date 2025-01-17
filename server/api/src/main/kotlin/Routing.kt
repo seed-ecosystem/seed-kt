@@ -27,18 +27,6 @@ val json = Json { ignoreUnknownKeys = true }
 class ChatService(private val messagesRepository: MessagesRepository) {
     suspend fun addMessage(message: Message) {
         val response = messagesRepository.sendMessage(message)
-        if (response.status) {
-            subscriptions[message.chatId]?.forEach { it.send(json.encodeToString(message)) }
-        } else {
-            session.send(
-                Frame.Text(
-                    json.encodeToString(
-                        EventResponseSerialization.serializer(),
-                        EventResponseSerialization("event", EventSerialization("error", response.message))
-                    )
-                )
-            )
-        }
     }
 
     suspend fun getChatData(chatId: String): List<Message> {
