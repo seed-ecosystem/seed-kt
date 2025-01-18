@@ -17,16 +17,17 @@ data class Message(
 )
 
 @Serializable
-data class Request(val type: String, val chatId: String? = null, val nonce: Int? = null, val message: Message? = null)
+data class Request(val type: String, val chatId: String? = null, val nonce: Long? = null, val message: Message? = null)
 
 @Serializable
-data class EventSerialization(val type: String, val chatId: String? = null, val message: Message? = null)
+data class EventSerialization(val type: String, val message: Message? = null, val chatId: String? = null)
 
 @Serializable
 data class EventResponseSerialization(val type: String, val event: EventSerialization)
 
-data class SubscriptionRequest(
-    val type: String,
-    val chatId: String,
-    val nonce: Long
-)
+interface Event
+@Serializable
+data class SendEvent(val chatId: String, val message: Message) : Event
+object PingEvent : Event
+@Serializable
+data class SubscribeEvent(val chatId: String, val nonce: Long = 0) : Event

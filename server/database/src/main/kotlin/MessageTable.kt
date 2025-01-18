@@ -33,7 +33,7 @@ class MessageTable(private val db: Database) : Table() {
 
     suspend fun getLastNonce(chatId: String) =
         newSuspendedTransaction(Dispatchers.IO, db) {
-            select { (CHAT_ID eq chatId) }.lastOrNull()?.get(NONCE)
+            select { (CHAT_ID eq chatId) }.lastOrNull()?.get(NONCE) 
         }
 
     suspend fun getMessagesByChatId(chatId: String): List<Message> =
