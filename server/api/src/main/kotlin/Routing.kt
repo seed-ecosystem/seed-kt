@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 interface MessagesRepository {
     suspend fun sendMessage(message: Message): Response
-    suspend fun getMessagesByChatId(chatId: String): List<Message>
+    suspend fun getMessagesByChatIdAndNonce(chatId: String, nonce: Long): List<Message>
 }
 
 val json = Json { ignoreUnknownKeys = true }
@@ -19,20 +19,19 @@ class ChatService(private val messagesRepository: MessagesRepository) {
         return response.status
     }
 
-    suspend fun getChatData(chatId: String): List<Message> {
-
-        return messagesRepository.getMessagesByChatId(chatId)
+    suspend fun getChatData(chatId: String, nonce: Long): List<Message> {
+        return messagesRepository.getMessagesByChatIdAndNonce(chatId, nonce)
     }
 }
 
 class SubscriptionHandler(private val chatService: ChatService) {
     private val subscriptions = ConcurrentHashMap<String, MutableSet<DefaultWebSocketServerSession>>()
 
-    suspend fun subscribe(session: DefaultWebSocketServerSession, chatId: String, nonce: Long) {
-
-        val messages = chatService.getChatData(chatId).sortedBy { it.nonce }
-
+    suspend fun subscribe(session: DefaultWebSocketServerSession, chatId: String, nonce: Long, useQueue: Boolean) {
+        val messages = chatService.getChatData(chatId, nonce)
+        
         subscriptions.computeIfAbsent(chatId) { mutableSetOf() }.add(session)
+        
         if (messages.isNotEmpty()) {
             val lastNonce = messages.last().nonce
             if (nonce >= lastNonce) {
@@ -40,16 +39,32 @@ class SubscriptionHandler(private val chatService: ChatService) {
                     Frame.Text(
                         json.encodeToString(
                             EventResponseSerialization.serializer(),
-                            EventResponseSerialization("event", EventSerialization("wait", chatId = chatId))
+                            EventResponseSerialization(
+                                "event",
+                                EventSerialization(
+                                    "wait",
+                                    chatId = if (useQueue) null else chatId,
+                                    queueId = if (useQueue) chatId else null,
+                                )
+                            )
                         )
                     )
                 )
             } else {
-                val missingMessages = messages.filter { it.nonce >= nonce }.sortedBy { it.nonce }
-                missingMessages.forEach { message ->
+                messages.forEach { message ->
                     val eventResponse = EventResponseSerialization(
                         "event",
-                        EventSerialization("new", message)
+                        EventSerialization(
+                            "new",
+                            Message(
+                                message.nonce,
+                                if (useQueue) null else chatId,
+                                if (useQueue) chatId else null,
+                                message.signature,
+                                message.content,
+                                message.contentIV
+                            )
+                        )
                     )
                     session.send(
                         Frame.Text(
@@ -64,7 +79,11 @@ class SubscriptionHandler(private val chatService: ChatService) {
                     Frame.Text(
                         json.encodeToString(
                             EventResponseSerialization.serializer(),
-                            EventResponseSerialization("event", EventSerialization("wait", chatId = chatId))
+                            EventResponseSerialization("event", EventSerialization(
+                                "wait",
+                                chatId = if (useQueue) null else chatId,
+                                queueId = if (useQueue) chatId else null,
+                            ))
                         )
                     )
                 )
@@ -74,7 +93,11 @@ class SubscriptionHandler(private val chatService: ChatService) {
                 Frame.Text(
                     json.encodeToString(
                         EventResponseSerialization.serializer(),
-                        EventResponseSerialization("event", EventSerialization("wait", chatId = chatId))
+                        EventResponseSerialization("event", EventSerialization(
+                            "wait",
+                            chatId = if (useQueue) null else chatId,
+                            queueId = if (useQueue) chatId else null,
+                        ))
                     )
                 )
             )
@@ -82,12 +105,22 @@ class SubscriptionHandler(private val chatService: ChatService) {
     }
     
     @OptIn(DelicateCoroutinesApi::class)
-    suspend fun notifySubscribers(chatId: String, message: Message) {
+    suspend fun notifySubscribers(chatId: String, message: Message, useQueue: Boolean) {
 
         subscriptions[chatId]?.forEach { session ->
             val eventResponse = EventResponseSerialization(
                 "event",
-                EventSerialization("new", message)
+                EventSerialization(
+                    "new", 
+                    Message(
+                        message.nonce,
+                        if (useQueue) null else chatId,
+                        if (useQueue) chatId else null,
+                        message.signature,
+                        message.content,
+                        message.contentIV
+                    )
+                )
             )
             session.send(Frame.Text(json.encodeToString(EventResponseSerialization.serializer(), eventResponse)))
         }
@@ -114,7 +147,7 @@ class EventBus(private val chatService: ChatService, internal val subscriptionHa
                 }
                 val response = Response("response", status = true)
                 session.send(Frame.Text(json.encodeToString(Response.serializer(), response)))
-                subscriptionHandler.notifySubscribers(event.chatId, event.message)
+                subscriptionHandler.notifySubscribers(event.chatId, event.message, event.useQueue)
             }
             is PingEvent -> {
                 val response = Response("response", status = true)
@@ -123,7 +156,7 @@ class EventBus(private val chatService: ChatService, internal val subscriptionHa
             is SubscribeEvent -> {
                 val response = Response("response", status = true)
                 session.send(Frame.Text(json.encodeToString(Response.serializer(), response)))
-                subscriptionHandler.subscribe(session, event.chatId, event.nonce)
+                subscriptionHandler.subscribe(session, event.chatId, event.nonce, event.useQueue)
             }
             else -> {
                 val response = Response("response", false)
@@ -144,15 +177,23 @@ fun Route.messageStream(eventBus: EventBus) = webSocket("/") {
                     continue
                 }
 
+                val id = request.id 
+
                 when (request.type) {
-                    "send" -> if (request.message != null) {
-                        eventBus.handleEvent(SendEvent(request.message!!.chatId, request.message!!), this)
-                    } else Response("send", false)
+                    "send" -> if (id != null && request.message != null) {
+                        val useQueue = request.chatId.isNullOrEmpty()
+                        eventBus.handleEvent(SendEvent(chatId = id, message = request.message!!, useQueue), this)
+                    } else {
+                        send(Frame.Text(json.encodeToString(Response.serializer(), Response("response", false))))
+                    }
+                    "subscribe" -> if (id != null && request.nonce != null) {
+                        val useQueue = request.chatId.isNullOrEmpty()
+                        eventBus.handleEvent(SubscribeEvent(chatId = id, nonce = request.nonce!!, useQueue), this)
+                    } else {
+                        send(Frame.Text(json.encodeToString(Response.serializer(), Response("response", false))))
+                    }
                     "ping" -> eventBus.handleEvent(PingEvent, this)
-                    "subscribe" -> if (request.chatId != null && request.nonce != null) {
-                        eventBus.handleEvent(SubscribeEvent(request.chatId!!, request.nonce!!), this)
-                    } else Response("response", false)
-                    else -> Response("response", false)
+                    else -> send(Frame.Text(json.encodeToString(Response.serializer(), Response("response", false))))
                 }
             }
         }

@@ -9,12 +9,10 @@ import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.cio.*
 import io.ktor.server.engine.*
-import io.ktor.server.http.content.*
 import io.ktor.server.plugins.autohead.*
 import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.plugins.doublereceive.*
 import io.ktor.server.plugins.partialcontent.*
-import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import kotlinx.coroutines.coroutineScope
@@ -33,8 +31,8 @@ suspend fun main(): Unit = coroutineScope {
         user = databaseUser,
         password = databasePassword
     )
-    val chatService = ChatService(MessagesRepositoryImpl(MessageTable(db))) // Сервис управления чатами
-    val subscriptionHandler = SubscriptionHandler(chatService) // Подписки
+    val chatService = ChatService(MessagesRepositoryImpl(MessageTable(db))) 
+    val subscriptionHandler = SubscriptionHandler(chatService) 
     val eventBus = EventBus(chatService, subscriptionHandler)
 
     val server = this.embeddedServer(CIO, host = "localhost", port = port){
@@ -50,8 +48,6 @@ suspend fun main(): Unit = coroutineScope {
         install(WebSockets)
 
         routing {
-            staticResources("/", null)
-            
             messageStream(eventBus)
         }
     }

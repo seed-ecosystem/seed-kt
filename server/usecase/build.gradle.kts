@@ -18,5 +18,5 @@ dependencies {
     implementation(libs.h2.jdbc)
 }
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(17)
 }

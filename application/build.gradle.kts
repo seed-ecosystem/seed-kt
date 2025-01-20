@@ -4,6 +4,7 @@ plugins {
     kotlin("jvm")
     kotlin("plugin.serialization")
     application
+    id("io.ktor.plugin") version "3.0.3"
 }
 
 dependencies {
@@ -47,9 +48,15 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(17)
 }
 
 application {
     mainClass = "app.seed.backend.MainKt"
+}
+
+ktor {
+    fatJar {
+        archiveFileName.set("app.jar")
+    }
 }

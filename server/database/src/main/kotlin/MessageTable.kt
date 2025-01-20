@@ -1,9 +1,5 @@
 import kotlinx.coroutines.Dispatchers
-import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.SchemaUtils
-import org.jetbrains.exposed.sql.Table
-import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.select
+import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.transactions.transaction
 
@@ -24,7 +20,7 @@ class MessageTable(private val db: Database) : Table() {
         newSuspendedTransaction(Dispatchers.IO, db) {
             insert { statement ->
                 statement[NONCE] = message.nonce
-                statement[CHAT_ID] = message.chatId
+                statement[CHAT_ID] = message.id!!
                 statement[SIGNATURE] = message.signature
                 statement[CONTENT] = message.content
                 statement[CONTENT_IV] = message.contentIV
@@ -39,6 +35,21 @@ class MessageTable(private val db: Database) : Table() {
     suspend fun getMessagesByChatId(chatId: String): List<Message> =
         newSuspendedTransaction(Dispatchers.IO, db) {
             select { (CHAT_ID eq chatId) }
+                .map {
+                    Message(
+                        nonce = it[NONCE],
+                        chatId = it[CHAT_ID],
+                        signature = it[SIGNATURE],
+                        content = it[CONTENT],
+                        contentIV = it[CONTENT_IV]
+                    )
+                }
+        }
+
+    suspend fun getMessagesByChatIdAndNonce(chatId: String, nonce: Long): List<Message> =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            select { (CHAT_ID eq chatId) and (NONCE greaterEq nonce) }
+                .orderBy(NONCE)
                 .map {
                     Message(
                         nonce = it[NONCE],

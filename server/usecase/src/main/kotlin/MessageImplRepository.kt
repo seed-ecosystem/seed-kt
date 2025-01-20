@@ -3,11 +3,12 @@ import java.util.Base64
 class MessagesRepositoryImpl(private val database: MessageTable) : MessagesRepository {
     override suspend fun sendMessage(message: Message): Response {
         with(message) {
-            if (!isValidInput(chatId, 32, 44)) return Response("response", false, 1)
+            if (message.id == null) return Response("response", false, 0)
+            if (!isValidInput(id!!, 32, 44)) return Response("response", false, 1)
             if (!isValidInput(signature, 32, 44)) return Response("response", false, 2)
             if (!isValidInput(contentIV, 12, 16)) return Response("response", false, 3)
             if (!isValidContentInput(content, 16384)) return Response("response", false, 4)
-            val lastNonce = database.getLastNonce(chatId)
+            val lastNonce = database.getLastNonce(id!!)
             if (lastNonce == null && message.nonce == 0L) {
                 database.saveMessage(message)
                 return Response("response", true)
@@ -20,8 +21,8 @@ class MessagesRepositoryImpl(private val database: MessageTable) : MessagesRepos
             
         }
     }
-    override suspend fun getMessagesByChatId(chatId: String): List<Message> {
-        return database.getMessagesByChatId(chatId)
+    override suspend fun getMessagesByChatIdAndNonce(chatId: String, nonce: Long): List<Message> {
+        return database.getMessagesByChatIdAndNonce(chatId, nonce)
     }
 }
 
