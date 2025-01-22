@@ -1,10 +1,14 @@
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class WebsocketResponse(
+    val type: String = "response",
+    val response: Response
+)
+
+@Serializable
 data class Response(
-    val type: String,
-    val status: Boolean,
-    val code: Int? = null,
+    val status: Boolean
 )
 
 @Serializable
@@ -16,8 +20,8 @@ data class Message(
     val content: String,
     val contentIV: String
 ) {
-    val id: String?
-        get() = chatId ?: queueId
+    val id: String
+        get() = chatId ?: queueId ?: error("Message must have either chatId or queueId")
 }
 
 @Serializable

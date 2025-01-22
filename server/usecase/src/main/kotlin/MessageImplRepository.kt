@@ -1,22 +1,21 @@
 import java.util.Base64
 
 class MessagesRepositoryImpl(private val database: MessageTable) : MessagesRepository {
-    override suspend fun sendMessage(message: Message): Response {
+    override suspend fun sendMessage(message: Message): WebsocketResponse {
         with(message) {
-            if (message.id == null) return Response("response", false, 0)
-            if (!isValidInput(id!!, 32, 44)) return Response("response", false, 1)
-            if (!isValidInput(signature, 32, 44)) return Response("response", false, 2)
-            if (!isValidInput(contentIV, 12, 16)) return Response("response", false, 3)
-            if (!isValidContentInput(content, 16384)) return Response("response", false, 4)
-            val lastNonce = database.getLastNonce(id!!)
+            if (!isValidInput(id, 32, 44)) return WebsocketResponse(response = Response(false))
+            if (!isValidInput(signature, 32, 44)) return WebsocketResponse(response = Response(false))
+            if (!isValidInput(contentIV, 12, 16)) return WebsocketResponse(response = Response(false))
+            if (!isValidContentInput(content, 16384)) return WebsocketResponse(response = Response(false))
+            val lastNonce = database.getLastNonce(id)
             if (lastNonce == null && message.nonce == 0L) {
                 database.saveMessage(message)
-                return Response("response", true)
+                return WebsocketResponse(response = Response(true))
             } else if (lastNonce != null && message.nonce == lastNonce + 1L) {
                 database.saveMessage(message)
-                return Response("response", true)
+                return WebsocketResponse(response = Response(true))
             } else {
-                return Response("response", false, 5)
+                return WebsocketResponse(response = Response(false))
             }
             
         }
