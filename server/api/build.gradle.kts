@@ -19,6 +19,12 @@ dependencies {
     implementation(libs.ktor.server.contentNegotiation)
     implementation(libs.ktor.server.requestValidation)
     implementation(libs.ktor.server.doubleReceive)
+    
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.cio)
+    implementation(libs.ktor.client.websocket)
+    implementation(libs.ktor.client.contentNegotiation)
+    implementation(libs.ktor.client.serializationJson)
 
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.exposed.core)

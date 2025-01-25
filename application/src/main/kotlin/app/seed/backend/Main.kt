@@ -4,9 +4,11 @@ import MessageTable
 import MessagesRepositoryImpl
 import controllers.ChatService
 import controllers.EventBus
+import controllers.ForwardingService
 import controllers.SubscriptionHandler
+import exceptions.installJson
 import io.ktor.http.*
-import io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter
+import io.ktor.serialization.kotlinx.*
 import io.ktor.server.application.*
 import io.ktor.server.cio.*
 import io.ktor.server.engine.*
@@ -19,7 +21,6 @@ import io.ktor.server.websocket.*
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
 import messageStream
-import org.example.exceptions.installJson
 import org.jetbrains.exposed.sql.Database
 
 suspend fun main(): Unit = coroutineScope {
@@ -33,16 +34,17 @@ suspend fun main(): Unit = coroutineScope {
         user = databaseUser,
         password = databasePassword
     )
-    
-    val chatService = ChatService(MessagesRepositoryImpl(MessageTable(db))) 
-    val subscriptionHandler = SubscriptionHandler(chatService) 
-    val eventBus = EventBus(chatService, subscriptionHandler)
 
     val json = Json {
         encodeDefaults = true
         ignoreUnknownKeys = true
         explicitNulls = false
     }
+
+    val chatService = ChatService(MessagesRepositoryImpl(MessageTable(db)))
+    val forwardingService = ForwardingService(json)
+    val subscriptionHandler = SubscriptionHandler(chatService)
+    val eventBus = EventBus(chatService, subscriptionHandler, forwardingService)
 
     val server = this.embeddedServer(CIO, host = "localhost", port = port){
         installJson()

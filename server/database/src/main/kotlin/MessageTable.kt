@@ -5,7 +5,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 
 class MessageTable(private val db: Database) : Table() {
     private val NONCE = long("NONCE").autoIncrement()
-    private val CHAT_ID = varchar("CHAT_ID", 344)
+    private val QUEUE_ID = varchar("QUEUE_ID", 344)
     private val SIGNATURE = varchar("SIGNATURE", 344)
     private val CONTENT = varchar("CONTENT", 16384)
     private val CONTENT_IV = varchar("CONTENT_IV", 16)
@@ -16,11 +16,11 @@ class MessageTable(private val db: Database) : Table() {
         }
     }
 
-    suspend fun saveMessage(message: Message) =
+    suspend fun saveMessage(message: MessageSerializable) =
         newSuspendedTransaction(Dispatchers.IO, db) {
             insert { statement ->
                 statement[NONCE] = message.nonce
-                statement[CHAT_ID] = message.id!!
+                statement[QUEUE_ID] = message.queueId
                 statement[SIGNATURE] = message.signature
                 statement[CONTENT] = message.content
                 statement[CONTENT_IV] = message.contentIV
@@ -29,16 +29,16 @@ class MessageTable(private val db: Database) : Table() {
 
     suspend fun getLastNonce(chatId: String) =
         newSuspendedTransaction(Dispatchers.IO, db) {
-            select { (CHAT_ID eq chatId) }.lastOrNull()?.get(NONCE) 
+            select { (QUEUE_ID eq chatId) }.lastOrNull()?.get(NONCE) 
         }
 
-    suspend fun getMessagesByChatId(chatId: String): List<Message> =
+    suspend fun getMessagesByChatId(chatId: String): List<MessageSerializable> =
         newSuspendedTransaction(Dispatchers.IO, db) {
-            select { (CHAT_ID eq chatId) }
+            select { (QUEUE_ID eq chatId) }
                 .map {
-                    Message(
+                    MessageSerializable(
                         nonce = it[NONCE],
-                        chatId = it[CHAT_ID],
+                        queueId = it[QUEUE_ID],
                         signature = it[SIGNATURE],
                         content = it[CONTENT],
                         contentIV = it[CONTENT_IV]
@@ -46,14 +46,14 @@ class MessageTable(private val db: Database) : Table() {
                 }
         }
 
-    suspend fun getMessagesByChatIdAndNonce(chatId: String, nonce: Long): List<Message> =
+    suspend fun getMessagesByChatIdAndNonce(chatId: String, nonce: Long): List<MessageSerializable> =
         newSuspendedTransaction(Dispatchers.IO, db) {
-            select { (CHAT_ID eq chatId) and (NONCE greaterEq nonce) }
+            select { (QUEUE_ID eq chatId) and (NONCE greaterEq nonce) }
                 .orderBy(NONCE)
                 .map {
-                    Message(
+                    MessageSerializable(
                         nonce = it[NONCE],
-                        chatId = it[CHAT_ID],
+                        queueId = it[QUEUE_ID],
                         signature = it[SIGNATURE],
                         content = it[CONTENT],
                         contentIV = it[CONTENT_IV]

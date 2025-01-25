@@ -1,8 +1,9 @@
 package controllers
 
-import EventResponseSerialization
-import EventSerialization
-import Message
+import BaseEventResponseSerializable
+import MessageEventSerializable
+import MessageSerializable
+import QueueEventSerializable
 import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.sendSerialized
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -14,74 +15,67 @@ import kotlin.collections.forEach
 class SubscriptionHandler(private val chatService: ChatService) {
     private val subscriptions = ConcurrentHashMap<String, MutableSet<DefaultWebSocketServerSession>>()
 
-    suspend fun subscribe(session: DefaultWebSocketServerSession, chatId: String, nonce: Long, useQueue: Boolean) {
-        val messages = chatService.getChatData(chatId, nonce)
+    suspend fun subscribe(session: DefaultWebSocketServerSession, queueId: String, nonce: Long) {
+        val messages = chatService.getChatData(queueId, nonce)
 
-        subscriptions.computeIfAbsent(chatId) { mutableSetOf() }.add(session)
+        subscriptions.computeIfAbsent(queueId) { mutableSetOf() }.add(session)
 
         if (messages.isNotEmpty()) {
             val lastNonce = messages.last().nonce
             if (nonce >= lastNonce) {
                 session.sendSerialized(
-                    EventResponseSerialization(
+                    BaseEventResponseSerializable(
                         "event",
-                        EventSerialization(
+                        QueueEventSerializable(
                             "wait",
-                            chatId = if (useQueue) null else chatId,
-                            queueId = if (useQueue) chatId else null,
+                            queueId = queueId
                         )
                     )
                 )
             } else {
                 messages.forEach { message ->
-                    session.sendSerialized(
-                        EventResponseSerialization(
-                            "event",
-                            EventSerialization(
-                                "new",
-                                Message(
-                                    message.nonce,
-                                    if (useQueue) null else chatId,
-                                    if (useQueue) chatId else null,
-                                    message.signature,
-                                    message.content,
-                                    message.contentIV
-                                )
+                    session.sendSerialized(BaseEventResponseSerializable(
+                        "event",
+                        MessageEventSerializable(
+                            "new",
+                            message = MessageSerializable(
+                                message.nonce,
+                                queueId,
+                                message.signature,
+                                message.content,
+                                message.contentIV
                             )
-                        )
+                        ))
                     )
                 }
                 session.sendSerialized(
-                    EventResponseSerialization("event", EventSerialization(
+                    BaseEventResponseSerializable("event", QueueEventSerializable(
                         "wait",
-                        chatId = if (useQueue) null else chatId,
-                        queueId = if (useQueue) chatId else null,
+                        queueId = queueId
                     ))
                 )
             }
         } else {
             session.sendSerialized(
-                EventResponseSerialization("event", EventSerialization(
+                BaseEventResponseSerializable("event", QueueEventSerializable(
                     "wait",
-                    chatId = if (useQueue) null else chatId,
-                    queueId = if (useQueue) chatId else null,
+                    queueId = queueId,
                 ))
             )
         }
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    suspend fun notifySubscribers(chatId: String, message: Message, useQueue: Boolean) {
+    suspend fun notifySubscribers(queueId: String, message: MessageSerializable) {
 
-        subscriptions[chatId]?.forEach { session ->
-            val eventResponse = EventResponseSerialization(
+        subscriptions[queueId]?.forEach { session ->
+            val eventResponse = BaseEventResponseSerializable(
                 "event",
-                EventSerialization(
+                MessageEventSerializable(
                     "new",
-                    Message(
+                    message = MessageSerializable(
                         message.nonce,
-                        if (useQueue) null else chatId,
-                        if (useQueue) chatId else null,
+                        queueId,
                         message.signature,
                         message.content,
                         message.contentIV

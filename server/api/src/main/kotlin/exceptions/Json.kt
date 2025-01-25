@@ -1,4 +1,4 @@
-package org.example.exceptions
+package exceptions
 
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.*
