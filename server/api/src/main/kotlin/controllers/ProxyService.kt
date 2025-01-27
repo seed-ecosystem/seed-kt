@@ -21,11 +21,12 @@ import kotlinx.serialization.json.Json
 import java.util.concurrent.ConcurrentHashMap
 
 class ForwardingService(val json: Json) {
-    private val connections = ConcurrentHashMap<String, DefaultClientWebSocketSession>()
+    private val connections =
+        ConcurrentHashMap<DefaultWebSocketServerSession, MutableMap<String, DefaultClientWebSocketSession>>()
 
     @OptIn(DelicateCoroutinesApi::class)
     suspend fun connect(url: String, serverSession: DefaultWebSocketServerSession) {
-        if (connections.containsKey(url)) {
+        if (connections[serverSession]?.containsKey(url) == true) {
             serverSession.sendSerialized(
                 WebsocketResponseSerializable(response = ResponseSerializable(false))
             )
@@ -35,7 +36,7 @@ class ForwardingService(val json: Json) {
         serverSession.sendSerialized(
             WebsocketResponseSerializable(response = ResponseSerializable(true))
         )
-        
+
         GlobalScope.launch {
             try {
                 val client = HttpClient(CIO) {
@@ -47,21 +48,15 @@ class ForwardingService(val json: Json) {
                     }
                 }
                 val session = client.webSocketSession(urlString = url)
-                connections[url] = session
+                connections.computeIfAbsent(serverSession) { mutableMapOf() }[url] = session
+
                 serverSession.sendSerialized(
                     BaseEventResponseSerializable(
                         "event",
                         ConnectEventSerializable("connected", url)
                     )
-                )
+                )  // comment it
 
-                session.incoming.consumeEach { frame ->
-                    if (frame is Frame.Close) {
-                        println("remove")
-                        handleDisconnect(url, serverSession)
-                    }
-                }
-                
             } catch (e: Exception) {
                 println(e)
                 handleDisconnect(url, serverSession)
@@ -70,42 +65,66 @@ class ForwardingService(val json: Json) {
     }
 
     suspend fun handleDisconnect(url: String, serverSession: DefaultWebSocketServerSession) {
-        serverSession.sendSerialized(
-            BaseEventResponseSerializable(
-                "event",
-                ConnectEventSerializable("disconnected", url)
-            )
-        )
-        connections.remove(url)?.close()
-    }
-
-    suspend fun closeAllConnections() {
-        connections.forEach { (url, clientSession) ->
-            println("remove")
-            clientSession.close()
-            connections.remove(url)
+        connections[serverSession]?.let { urlClientMap ->
+            urlClientMap[url]?.let { clientSession ->
+                clientSession.close()
+                serverSession.sendSerialized(
+                    BaseEventResponseSerializable(
+                        "event",
+                        ConnectEventSerializable("disconnected", url)
+                    )
+                )
+                urlClientMap.remove(url)
+            }
         }
     }
 
-    suspend fun forward(url: String, request: String): String? {
-        val session = connections[url] ?: return null
-        return try {
-            session.send(Frame.Text(request))
-            val response = session.incoming.receive() as? Frame.Text
-            response?.readText()
+
+    suspend fun closeAllConnections(serverSession: DefaultWebSocketServerSession) {
+        connections[serverSession]?.let { urlClientMap ->
+            urlClientMap.forEach { (url, clientSession) ->
+                clientSession.close()
+                println("Closing connection to $url")
+                serverSession.sendSerialized(
+                    BaseEventResponseSerializable(
+                        "event",
+                        ConnectEventSerializable("disconnected", url)
+                    )
+                )
+            }
+            connections.remove(serverSession)
+        }
+    }
+
+    suspend fun forward(url: String, request: String, serverSession: DefaultWebSocketServerSession) {
+        val clientSession = connections[serverSession]?.get(url)
+        if (clientSession == null) {
+            serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
+            return
+        }
+
+        try {
+            clientSession.send(request)
+            clientSession.incoming.consumeEach { frame ->
+                if (frame is Frame.Text) {
+                    val responseText = frame.readText()
+                    print(responseText)
+                    serverSession.sendForwarded(json, responseText, url)
+                }
+            }
         } catch (e: Exception) {
-            null
+            println("mem")
+            println(e)
+            serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
+            return
+        }
+
+    }
+
+    suspend fun pingAllConnections(serverSession: DefaultWebSocketServerSession) {
+        connections[serverSession]?.values?.forEach { clientSession ->
+            clientSession.send(Frame.Text("""{"type":"ping"}"""))
         }
     }
 
-    fun selfForward(request: String): String {
-        // Локальная обработка запроса
-        return request // Тестовая заглушка
-    }
-
-    suspend fun pingAllConnections() {
-        connections.values.forEach { session ->
-            session.send(Frame.Text("""{"type":"ping"}"""))
-        }
-    }
 }

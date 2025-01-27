@@ -22,7 +22,7 @@ fun Route.messageStream(eventBus: EventBus, json: Json) = webSocket("/ws") {
                     continue
                 }
                 
-                handleBaseRequest(json, frame, rawRequest, eventBus, this)
+                handleBaseRequest(json, frame.readText(), rawRequest, eventBus, this)
             }
         }
     } catch (e: Exception) {
@@ -30,7 +30,7 @@ fun Route.messageStream(eventBus: EventBus, json: Json) = webSocket("/ws") {
         sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
     } finally {
         eventBus.subscriptionHandler.removeSession(this)
-        eventBus.forwardingService.closeAllConnections()
+        eventBus.forwardingService.closeAllConnections(this)
     }
 }
 

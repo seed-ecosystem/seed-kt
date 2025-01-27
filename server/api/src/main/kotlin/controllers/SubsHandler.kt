@@ -4,18 +4,21 @@ import BaseEventResponseSerializable
 import MessageEventSerializable
 import MessageSerializable
 import QueueEventSerializable
-import io.ktor.server.websocket.DefaultWebSocketServerSession
-import io.ktor.server.websocket.sendSerialized
+import io.ktor.server.websocket.*
 import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.serialization.json.Json
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.collections.component1
-import kotlin.collections.component2
-import kotlin.collections.forEach
 
 class SubscriptionHandler(private val chatService: ChatService) {
     private val subscriptions = ConcurrentHashMap<String, MutableSet<DefaultWebSocketServerSession>>()
 
-    suspend fun subscribe(session: DefaultWebSocketServerSession, queueId: String, nonce: Long) {
+    suspend fun subscribe(
+        session: DefaultWebSocketServerSession,
+        queueId: String,
+        nonce: Long,
+        json: Json,
+        forwardUrl: String?
+    ) {
         val messages = chatService.getChatData(queueId, nonce)
 
         subscriptions.computeIfAbsent(queueId) { mutableSetOf() }.add(session)
@@ -23,18 +26,25 @@ class SubscriptionHandler(private val chatService: ChatService) {
         if (messages.isNotEmpty()) {
             val lastNonce = messages.last().nonce
             if (nonce >= lastNonce) {
-                session.sendSerialized(
-                    BaseEventResponseSerializable(
-                        "event",
-                        QueueEventSerializable(
-                            "wait",
-                            queueId = queueId
-                        )
+                val response = BaseEventResponseSerializable(
+                    "event",
+                    QueueEventSerializable(
+                        "wait",
+                        queueId = queueId
                     )
                 )
+                if (forwardUrl != null) {
+                    session.sendForwarded(
+                        json,
+                        response,
+                        forwardUrl
+                    )
+                } else {
+                    session.sendSerialized(response)
+                }
             } else {
                 messages.forEach { message ->
-                    session.sendSerialized(BaseEventResponseSerializable(
+                    val response = BaseEventResponseSerializable(
                         "event",
                         MessageEventSerializable(
                             "new",
@@ -45,28 +55,55 @@ class SubscriptionHandler(private val chatService: ChatService) {
                                 message.content,
                                 message.contentIV
                             )
-                        ))
+                        )
                     )
+                    if (forwardUrl != null) {
+                        session.sendForwarded(
+                            json,
+                            response,
+                            forwardUrl
+                        )
+                    } else {
+                        session.sendSerialized(response)
+                    }
                 }
-                session.sendSerialized(
-                    BaseEventResponseSerializable("event", QueueEventSerializable(
+                val response = BaseEventResponseSerializable(
+                    "event", QueueEventSerializable(
                         "wait",
                         queueId = queueId
-                    ))
+                    )
                 )
+                if (forwardUrl != null) {
+                    session.sendForwarded(
+                        json,
+                        response,
+                        forwardUrl
+                    )
+                } else {
+                    session.sendSerialized(response)
+                }
             }
         } else {
-            session.sendSerialized(
-                BaseEventResponseSerializable("event", QueueEventSerializable(
+            val response = BaseEventResponseSerializable(
+                "event", QueueEventSerializable(
                     "wait",
                     queueId = queueId,
-                ))
+                )
             )
+            if (forwardUrl != null) {
+                session.sendForwarded(
+                    json,
+                    response,
+                    forwardUrl
+                )
+            } else {
+                session.sendSerialized(response)
+            }
         }
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    suspend fun notifySubscribers(queueId: String, message: MessageSerializable) {
+    suspend fun notifySubscribers(queueId: String, message: MessageSerializable, json: Json, forwardUrl: String?) {
 
         subscriptions[queueId]?.forEach { session ->
             val eventResponse = BaseEventResponseSerializable(
@@ -82,7 +119,11 @@ class SubscriptionHandler(private val chatService: ChatService) {
                     )
                 )
             )
-            session.sendSerialized(eventResponse)
+            if (forwardUrl != null) {
+                session.sendForwarded(json, eventResponse, forwardUrl)
+            } else {
+                session.sendSerialized(eventResponse)
+            }
         }
     }
 

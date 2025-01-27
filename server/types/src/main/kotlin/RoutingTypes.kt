@@ -1,4 +1,5 @@
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class WebsocketResponseSerializable(
@@ -44,6 +45,24 @@ data class ConnectRequest(
     val url: String
 )
 
+@Serializable
+data class ForwardRequest(
+    val type: String = "forward",
+    val url: String,
+    val request: JsonElement
+)
+
+@Serializable
+data class PingRequest(
+    val type: String = "ping"
+)
+
+@Serializable
+data class ForwardWrapper(
+    val type: String = "forward",
+    val url: String,
+    val forward: JsonElement
+)
 //Events Response
 
 @Serializable
@@ -94,4 +113,9 @@ data class SubscribeEvent(
 
 data class ConnectEvent(
     val url: String
+) : Event
+
+data class ForwardEvent(
+    val url: String,
+    val request: String
 ) : Event
