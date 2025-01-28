@@ -56,9 +56,10 @@ class EventBus(
                 subscriptionHandler.notifySubscribers(event.queueId, event.message, json, forwardUrl)
             }
             is PingEvent -> {
-                
-                val websocketResponse = WebsocketResponseSerializable(response = ResponseSerializable(true))
-                session.sendSerialized(websocketResponse)
+                if (forwardUrl == null) {
+                    val websocketResponse = WebsocketResponseSerializable(response = ResponseSerializable(true))
+                    session.sendSerialized(websocketResponse)
+                } else forwardingService.pingAllConnections(session)
             }
             is SubscribeEvent -> {
                 if (forwardUrl == null) {

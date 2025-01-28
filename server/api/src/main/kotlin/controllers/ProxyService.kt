@@ -50,12 +50,12 @@ class ForwardingService(val json: Json) {
                 val session = client.webSocketSession(urlString = url)
                 connections.computeIfAbsent(serverSession) { mutableMapOf() }[url] = session
 
-                serverSession.sendSerialized(
-                    BaseEventResponseSerializable(
-                        "event",
-                        ConnectEventSerializable("connected", url)
-                    )
-                )  // comment it
+//                serverSession.sendSerialized(
+//                    BaseEventResponseSerializable(
+//                        "event",
+//                        ConnectEventSerializable("connected", url)
+//                    )
+//                )  // comment it
 
             } catch (e: Exception) {
                 println(e)
@@ -122,8 +122,18 @@ class ForwardingService(val json: Json) {
     }
 
     suspend fun pingAllConnections(serverSession: DefaultWebSocketServerSession) {
-        connections[serverSession]?.values?.forEach { clientSession ->
-            clientSession.send(Frame.Text("""{"type":"ping"}"""))
+        connections[serverSession]?.forEach { (url, clientSession) ->
+            try {
+                clientSession.send(Frame.Text("""{"type":"ping"}"""))
+                val frame = clientSession.incoming.receive() as Frame.Text
+                serverSession.sendForwarded(json, frame.readText(), url)
+            } catch (_: Exception) {
+                serverSession.sendForwarded(
+                    json,
+                    WebsocketResponseSerializable(response = ResponseSerializable(false)),
+                    url
+                )
+            }
         }
     }
 
