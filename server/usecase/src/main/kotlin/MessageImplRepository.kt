@@ -1,30 +1,43 @@
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 
 class MessagesRepositoryImpl(private val database: MessageTable) : MessagesRepository {
-    private val mutexMap = mutableMapOf<String, Mutex>()
+    private val mutexMap = ConcurrentHashMap<String, Mutex>()
     
     override suspend fun sendMessage(message: MessageSerializable): WebsocketResponseSerializable {
         with(message) {
-            if (!isValidInput(queueId, 32, 44)) return WebsocketResponseSerializable(response = ResponseSerializable(false))
-            if (!isValidInput(signature, 32, 44)) return WebsocketResponseSerializable(response = ResponseSerializable(false))
-            if (!isValidInput(contentIV, 12, 16)) return WebsocketResponseSerializable(response = ResponseSerializable(false))
-            if (!isValidContentInput(content, 16384)) return WebsocketResponseSerializable(response = ResponseSerializable(false))
-
-            val mutex = mutexMap.getOrPut(queueId) { Mutex() }
-            
-            return mutex.withLock {
-                val lastNonce = database.getLastNonce(queueId)
-                if (lastNonce == null && message.nonce == 0L) {
-                    database.saveMessage(message)
-                    WebsocketResponseSerializable(response = ResponseSerializable(true))
-                } else if (lastNonce != null && message.nonce == lastNonce + 1L) {
-                    database.saveMessage(message)
-                    WebsocketResponseSerializable(response = ResponseSerializable(true))
-                } else {
-                    WebsocketResponseSerializable(response = ResponseSerializable(false))
+            if (!isValidInput(queueId, 32, 44)) {
+                return WebsocketResponseSerializable(response = ResponseSerializable(false))
+            }
+            if (!isValidInput(signature, 32, 44)) {
+                return WebsocketResponseSerializable(response = ResponseSerializable(false))
+            }
+            if (!isValidInput(contentIV, 12, 16)) {
+                return WebsocketResponseSerializable(response = ResponseSerializable(false))
+            }
+            if (!isValidContentInput(content, 16384)) {
+                return WebsocketResponseSerializable(response = ResponseSerializable(false))
                 }
+
+            val mutex = mutexMap.computeIfAbsent(queueId) { Mutex() }
+
+            try {
+                return mutex.withLock {
+                    val lastNonce = database.getLastNonce(queueId)
+                    if (lastNonce == null && message.nonce == 0L) {
+                        database.saveMessage(message)
+                        WebsocketResponseSerializable(response = ResponseSerializable(true))
+                    } else if (lastNonce != null && message.nonce == lastNonce + 1L) {
+                        database.saveMessage(message)
+                        WebsocketResponseSerializable(response = ResponseSerializable(true))
+                    } else {
+                        WebsocketResponseSerializable(response = ResponseSerializable(false))
+                    }
+                }
+            } finally {
+                mutexMap.remove(queueId, mutex)
             }
         }
     }
