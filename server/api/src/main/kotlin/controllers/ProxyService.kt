@@ -131,20 +131,13 @@ class ForwardingService(val json: Json) {
             connections[serverSession]?.forEach { (_, clientSession) ->
                 clientSession.send(Frame.Text("""{"type":"ping"}"""))
             }
-        } catch (_: Exception) {
+        } finally {
             if (forwardUrl == null) {
-                serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
+                serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(true)))
             } else
-            serverSession.sendForwarded(
-                json,
-                WebsocketResponseSerializable(response = ResponseSerializable(false)),
-                forwardUrl
-            )
+                serverSession.sendForwarded(json, ResponseSerializable(true), forwardUrl)
         }
-        if (forwardUrl == null) {
-            serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(true)))
-        } else
-        serverSession.sendForwarded(json, ResponseSerializable(true), forwardUrl)
+        
     }
 
 }
