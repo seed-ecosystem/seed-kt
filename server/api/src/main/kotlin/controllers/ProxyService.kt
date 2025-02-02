@@ -13,8 +13,8 @@ import io.ktor.serialization.kotlinx.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -25,7 +25,7 @@ class ForwardingService(val json: Json) {
         ConcurrentHashMap<DefaultWebSocketServerSession, MutableMap<String, DefaultClientWebSocketSession>>()
 
     @OptIn(DelicateCoroutinesApi::class)
-    suspend fun connect(url: String, serverSession: DefaultWebSocketServerSession) {
+    suspend fun connect(url: String, serverSession: DefaultWebSocketServerSession, scope: CoroutineScope) {
         if (connections[serverSession]?.containsKey(url) == true) {
             serverSession.sendSerialized(
                 WebsocketResponseSerializable(response = ResponseSerializable(false))
@@ -33,11 +33,9 @@ class ForwardingService(val json: Json) {
             return
         }
 
-        serverSession.sendSerialized(
-            WebsocketResponseSerializable(response = ResponseSerializable(true))
-        )
+        
 
-        GlobalScope.launch {
+        scope.launch {
             try {
                 val client = HttpClient(CIO) {
                     install(ContentNegotiation) {
@@ -47,16 +45,15 @@ class ForwardingService(val json: Json) {
                         contentConverter = KotlinxWebsocketSerializationConverter(json)
                     }
                 }
-                val session = client.webSocketSession(urlString = url)
-                connections.computeIfAbsent(serverSession) { mutableMapOf() }[url] = session
-
-//                serverSession.sendSerialized(
-//                    BaseEventResponseSerializable(
-//                        "event",
-//                        ConnectEventSerializable("connected", url)
-//                    )
-//                )  // comment it
-
+                val clientSession = try {
+                    client.webSocketSession(urlString = url)
+                } finally {
+                    serverSession.sendSerialized(
+                        WebsocketResponseSerializable(response = ResponseSerializable(true))
+                    )
+                }
+                connections.computeIfAbsent(serverSession) { mutableMapOf() }[url] = clientSession
+                
             } catch (e: Exception) {
                 println(e)
                 handleDisconnect(url, serverSession)
@@ -81,24 +78,32 @@ class ForwardingService(val json: Json) {
 
 
     suspend fun closeAllConnections(serverSession: DefaultWebSocketServerSession) {
-        connections[serverSession]?.let { urlClientMap ->
-            urlClientMap.forEach { (url, clientSession) ->
-                clientSession.close()
-                println("Closing connection to $url")
-                serverSession.sendSerialized(
-                    BaseEventResponseSerializable(
-                        "event",
-                        ConnectEventSerializable("disconnected", url)
+        try {
+            connections[serverSession]?.let { urlClientMap ->
+                urlClientMap.forEach { (url, clientSession) ->
+                    clientSession.close()
+                    println("Closing connection to $url")
+                    serverSession.sendSerialized(
+                        BaseEventResponseSerializable(
+                            "event",
+                            ConnectEventSerializable("disconnected", url)
+                        )
                     )
-                )
+                }
+                connections.remove(serverSession)
             }
-            connections.remove(serverSession)
+        } catch (e: Exception) {
+            println("CloseAllConnection")
+            println(e)
         }
+        
     }
 
     suspend fun forward(url: String, request: String, serverSession: DefaultWebSocketServerSession) {
         val clientSession = connections[serverSession]?.get(url)
         if (clientSession == null) {
+            println(connections[serverSession])
+            println(url)
             serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
             return
         }
@@ -121,20 +126,25 @@ class ForwardingService(val json: Json) {
 
     }
 
-    suspend fun pingAllConnections(serverSession: DefaultWebSocketServerSession) {
-        connections[serverSession]?.forEach { (url, clientSession) ->
-            try {
+    suspend fun pingAllConnections(serverSession: DefaultWebSocketServerSession, forwardUrl: String? = null) {
+        try {
+            connections[serverSession]?.forEach { (_, clientSession) ->
                 clientSession.send(Frame.Text("""{"type":"ping"}"""))
-                val frame = clientSession.incoming.receive() as Frame.Text
-                serverSession.sendForwarded(json, frame.readText(), url)
-            } catch (_: Exception) {
-                serverSession.sendForwarded(
-                    json,
-                    WebsocketResponseSerializable(response = ResponseSerializable(false)),
-                    url
-                )
             }
+        } catch (_: Exception) {
+            if (forwardUrl == null) {
+                serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
+            } else
+            serverSession.sendForwarded(
+                json,
+                WebsocketResponseSerializable(response = ResponseSerializable(false)),
+                forwardUrl
+            )
         }
+        if (forwardUrl == null) {
+            serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(true)))
+        } else
+        serverSession.sendForwarded(json, ResponseSerializable(true), forwardUrl)
     }
 
 }

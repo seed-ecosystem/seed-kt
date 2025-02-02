@@ -16,6 +16,7 @@ import SubscribeRequest
 import WebsocketResponseSerializable
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -32,6 +33,7 @@ class EventBus(
         session: DefaultWebSocketServerSession,
         json: Json,
         forwardUrl: String?,
+        scope: CoroutineScope
     ) {
         when (event) {
             is SendEvent -> {
@@ -57,9 +59,13 @@ class EventBus(
             }
             is PingEvent -> {
                 if (forwardUrl == null) {
+                    forwardingService.pingAllConnections(session)
+                } else if (forwardUrl != "wss://meetacy.app/seed-kt") {
                     val websocketResponse = WebsocketResponseSerializable(response = ResponseSerializable(true))
                     session.sendSerialized(websocketResponse)
-                } else forwardingService.pingAllConnections(session)
+                } else {
+                    forwardingService.pingAllConnections(session, forwardUrl)
+                }
             }
             is SubscribeEvent -> {
                 if (forwardUrl == null) {
@@ -73,7 +79,7 @@ class EventBus(
                 subscriptionHandler.subscribe(session, event.queueId, event.nonce, json, forwardUrl)
             }
             is ConnectEvent -> {
-                forwardingService.connect(event.url, session)
+                forwardingService.connect(event.url, session, scope)
             }
             is ForwardEvent -> {
                 forwardingService.forward(event.url, event.request, session)
@@ -94,7 +100,8 @@ suspend fun handleBaseRequest(
     baseRequest: BaseRequest,
     eventBus: EventBus,
     session: DefaultWebSocketServerSession,
-    forwardUrl: String? = null
+    forwardUrl: String? = null,
+    scope: CoroutineScope
 ) {
     when (baseRequest.type) {
         "send" -> {
@@ -110,7 +117,7 @@ suspend fun handleBaseRequest(
                 )
                 return
             }
-            eventBus.handleEvent(SendEvent(request.message.queueId, request.message), session, json, forwardUrl)
+            eventBus.handleEvent(SendEvent(request.message.queueId, request.message), session, json, forwardUrl, scope)
         }
 
         "subscribe" -> {
@@ -128,7 +135,7 @@ suspend fun handleBaseRequest(
                 )
                 return
             }
-            eventBus.handleEvent(SubscribeEvent(request.queueId, nonce = request.nonce), session, json, forwardUrl)
+            eventBus.handleEvent(SubscribeEvent(request.queueId, nonce = request.nonce), session, json, forwardUrl, scope)
         }
 
         "connect" -> {
@@ -144,7 +151,7 @@ suspend fun handleBaseRequest(
                 return
             }
            
-            eventBus.handleEvent(ConnectEvent(request.url), session, json, forwardUrl)
+            eventBus.handleEvent(ConnectEvent(request.url), session, json, forwardUrl, scope)
         }
         
         "forward" -> {
@@ -159,10 +166,12 @@ suspend fun handleBaseRequest(
             val forwardRequestType = try {
                 json.decodeFromString<BaseRequest>(forwardRequestString)
             } catch (_: Exception) {
+                println("ошибка внутри форварда")
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
                 return
             }
             if (forwardRequestType.type == "forward" || forwardRequestType.type == "connect") {
+                println("ошибка внутри форварда2")
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
                 return
             }
@@ -173,7 +182,8 @@ suspend fun handleBaseRequest(
                     forwardRequestType,
                     eventBus,
                     session,
-                    websocketRequest.url
+                    websocketRequest.url,
+                    scope
                 )
                 return
             }
@@ -185,12 +195,13 @@ suspend fun handleBaseRequest(
                 ),
                 session,
                 json,
-                websocketRequest.url
+                websocketRequest.url,
+                scope
             )
         }
         
         "ping" -> {
-            eventBus.handleEvent(PingEvent, session, json, forwardUrl)
+            eventBus.handleEvent(PingEvent, session, json, forwardUrl, scope)
         }
 
         else -> {
