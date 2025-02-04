@@ -168,12 +168,10 @@ suspend fun handleBaseRequest(
             val forwardRequestType = try {
                 json.decodeFromString<BaseRequest>(forwardRequestString)
             } catch (_: Exception) {
-                println("ошибка внутри форварда")
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
                 return
             }
             if (forwardRequestType.type == "forward" || forwardRequestType.type == "connect") {
-                println("ошибка внутри форварда2")
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
                 return
             }
