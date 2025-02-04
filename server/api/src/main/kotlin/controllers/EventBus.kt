@@ -14,6 +14,7 @@ import SendRequest
 import SubscribeEvent
 import SubscribeRequest
 import WebsocketResponseSerializable
+import io.ktor.http.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.CoroutineScope
@@ -58,9 +59,10 @@ class EventBus(
                 subscriptionHandler.notifySubscribers(event.queueId, event.message, json, forwardUrl)
             }
             is PingEvent -> {
+                
                 if (forwardUrl == null) {
                     forwardingService.pingAllConnections(session)
-                } else if (forwardUrl != "wss://meetacy.app/seed-kt") {
+                } else if (Url(forwardUrl).fullPath != "meetacy.app/seed-kt") {
                     val websocketResponse = WebsocketResponseSerializable(response = ResponseSerializable(true))
                     session.sendSerialized(websocketResponse)
                 } else {
@@ -145,8 +147,8 @@ suspend fun handleBaseRequest(
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
                 return
             }
-            
-            if (request.url == "wss://meetacy.app/seed-kt") {
+            val url = Url(request.url).fullPath
+            if (url == "meetacy.app/seed-kt") {
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(true)))
                 return
             }
@@ -175,7 +177,8 @@ suspend fun handleBaseRequest(
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
                 return
             }
-            if (websocketRequest.url == "wss://meetacy.app/seed-kt" || websocketRequest.url == "ws://meetacy.app/seed-kt") {
+            val url = Url(websocketRequest.url).fullPath
+            if (url == "meetacy.app/seed-kt") {
                 handleBaseRequest(
                     json,
                     forwardRequestString,

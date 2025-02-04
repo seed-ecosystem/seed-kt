@@ -32,9 +32,7 @@ class ForwardingService(val json: Json) {
             )
             return
         }
-
         
-
         scope.launch {
             try {
                 val client = HttpClient(CIO) {
@@ -52,31 +50,31 @@ class ForwardingService(val json: Json) {
                         WebsocketResponseSerializable(response = ResponseSerializable(true))
                     )
                 }
+                clientSession.outgoing.invokeOnClose {
+                    launch {
+                        handleDisconnect(url, serverSession, true)
+                    }
+                }
                 connections.computeIfAbsent(serverSession) { mutableMapOf() }[url] = clientSession
                 
-            } catch (e: Exception) {
-                println(e)
-                handleDisconnect(url, serverSession)
+            } catch (_: Exception) {
+                handleDisconnect(url, serverSession, false)
             }
         }
     }
 
-    suspend fun handleDisconnect(url: String, serverSession: DefaultWebSocketServerSession) {
-        connections[serverSession]?.let { urlClientMap ->
-            urlClientMap[url]?.let { clientSession ->
-                clientSession.close()
-                serverSession.sendSerialized(
-                    BaseEventResponseSerializable(
-                        "event",
-                        ConnectEventSerializable("disconnected", url)
-                    )
-                )
-                urlClientMap.remove(url)
-            }
+    suspend fun handleDisconnect(url: String, serverSession: DefaultWebSocketServerSession, wasConnected: Boolean) {
+        serverSession.sendSerialized(
+            BaseEventResponseSerializable(
+                "event",
+                ConnectEventSerializable("disconnected", url)
+            )
+        )
+        if (wasConnected) {
+            connections[serverSession]?.remove(url)
         }
     }
-
-
+    
     suspend fun closeAllConnections(serverSession: DefaultWebSocketServerSession) {
         try {
             connections[serverSession]?.let { urlClientMap ->
