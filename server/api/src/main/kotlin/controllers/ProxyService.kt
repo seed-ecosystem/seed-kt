@@ -6,13 +6,17 @@ import ResponseSerializable
 import WebsocketResponseSerializable
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.request.*
+import io.ktor.http.*
 import io.ktor.serialization.kotlinx.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.channels.consumeEach
@@ -44,35 +48,34 @@ class ForwardingService(val json: Json) {
                     }
                 }
                 val clientSession = try {
-                    client.webSocketSession(urlString = url)
+                    client.seedWebSocketSession(urlString = url, onClose = {
+                        serverSession.launch {
+                            handleDisconnect(url, serverSession)
+                        }
+                    })
                 } finally {
                     serverSession.sendSerialized(
                         WebsocketResponseSerializable(response = ResponseSerializable(true))
                     )
                 }
-                clientSession.outgoing.invokeOnClose {
-                    launch {
-                        handleDisconnect(url, serverSession, true)
-                    }
-                }
+                
                 connections.computeIfAbsent(serverSession) { mutableMapOf() }[url] = clientSession
                 
-            } catch (_: Exception) {
-                handleDisconnect(url, serverSession, false)
+            } catch (e: Exception) {
+                println(e)
+                handleDisconnect(url, serverSession)
             }
         }
     }
 
-    suspend fun handleDisconnect(url: String, serverSession: DefaultWebSocketServerSession, wasConnected: Boolean) {
+    suspend fun handleDisconnect(url: String, serverSession: DefaultWebSocketServerSession) {
         serverSession.sendSerialized(
             BaseEventResponseSerializable(
                 "event",
                 ConnectEventSerializable("disconnected", url)
             )
         )
-        if (wasConnected) {
-            connections[serverSession]?.remove(url)
-        }
+        connections[serverSession]?.remove(url)
     }
     
     suspend fun closeAllConnections(serverSession: DefaultWebSocketServerSession) {
@@ -138,4 +141,49 @@ class ForwardingService(val json: Json) {
         
     }
 
+}
+
+suspend fun HttpClient.seedWebSocketSession(
+    onClose: (Throwable?) -> Unit = {},
+    block: HttpRequestBuilder.() -> Unit,
+): DefaultClientWebSocketSession {
+    plugin(WebSockets)
+    val sessionDeferred = CompletableDeferred<DefaultClientWebSocketSession>()
+    val statement = prepareRequest {
+        url {
+            protocol = URLProtocol.WS
+            port = protocol.defaultPort
+        }
+        block()
+    }
+
+    @Suppress("SuspendFunctionOnCoroutineScope")
+    launch {
+        try {
+            statement.body<DefaultClientWebSocketSession, Unit> { session ->
+                val sessionCompleted = CompletableDeferred<Unit>()
+                sessionDeferred.complete(session)
+                
+                session.outgoing.invokeOnClose { cause ->
+                    println("тварь закрылась")
+                    onClose(cause)
+                    sessionCompleted.complete(Unit)
+                }
+                sessionCompleted.await() 
+            }
+        } catch (cause: Throwable) {
+            sessionDeferred.completeExceptionally(cause)
+        }
+    }
+
+    return sessionDeferred.await()
+}
+
+suspend fun HttpClient.seedWebSocketSession(
+    urlString: String,
+    block: HttpRequestBuilder.() -> Unit = {},
+    onClose: (Throwable?) -> Unit = {}
+): DefaultClientWebSocketSession = seedWebSocketSession(onClose = onClose) {
+    url.takeFrom(urlString)
+    block()
 }
