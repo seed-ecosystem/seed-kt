@@ -81,15 +81,8 @@ class ForwardingService(val json: Json) {
     suspend fun closeAllConnections(serverSession: DefaultWebSocketServerSession) {
         try {
             connections[serverSession]?.let { urlClientMap ->
-                urlClientMap.forEach { (url, clientSession) ->
+                urlClientMap.forEach { (_, clientSession) ->
                     clientSession.close()
-                    println("Closing connection to $url")
-                    serverSession.sendSerialized(
-                        BaseEventResponseSerializable(
-                            "event",
-                            ConnectEventSerializable("disconnected", url)
-                        )
-                    )
                 }
                 connections.remove(serverSession)
             }
