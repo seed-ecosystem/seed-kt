@@ -59,10 +59,9 @@ class EventBus(
                 subscriptionHandler.notifySubscribers(event.queueId, event.message, json, forwardUrl)
             }
             is PingEvent -> {
-                
                 if (forwardUrl == null) {
                     forwardingService.pingAllConnections(session)
-                } else if (Url(forwardUrl).fullPath != "meetacy.app/seed-kt") {
+                } else if (Url(forwardUrl).host + Url(forwardUrl).fullPath == "meetacy.app/seed-kt") {
                     val websocketResponse = WebsocketResponseSerializable(response = ResponseSerializable(true))
                     session.sendSerialized(websocketResponse)
                 } else {
@@ -70,6 +69,7 @@ class EventBus(
                 }
             }
             is SubscribeEvent -> {
+                println("Сабскрайб с форвард $forwardUrl пришел")
                 if (forwardUrl == null) {
                     val websocketResponse = WebsocketResponseSerializable(response = ResponseSerializable(true))
                     session.sendSerialized(websocketResponse)
@@ -147,8 +147,8 @@ suspend fun handleBaseRequest(
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
                 return
             }
-            val url = Url(request.url).fullPath
-            if (url == "meetacy.app/seed-kt") {
+            val url = Url(request.url)
+            if (url.host + url.fullPath == "meetacy.app/seed-kt") {
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(true)))
                 return
             }
@@ -175,8 +175,10 @@ suspend fun handleBaseRequest(
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
                 return
             }
-            val url = Url(websocketRequest.url).fullPath
-            if (url == "meetacy.app/seed-kt") {
+            
+            val url = Url(websocketRequest.url)
+            if (url.host + url.fullPath == "meetacy.app/seed-kt") {
+                println("форвард для $url принят, отправлен по рекурсии")
                 handleBaseRequest(
                     json,
                     forwardRequestString,
