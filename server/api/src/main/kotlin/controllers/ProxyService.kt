@@ -101,14 +101,17 @@ class ForwardingService(val json: Json) {
             serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
             return
         }
-
+        println(url)
         try {
             clientSession.send(request)
-            clientSession.incoming.consumeEach { frame ->
-                if (frame is Frame.Text) {
-                    val responseText = frame.readText()
-                    print(responseText)
-                    serverSession.sendForwarded(json, responseText, url)
+            println("отправлено")
+            serverSession.launch {
+                clientSession.incoming.consumeEach { frame ->
+                    if (frame is Frame.Text) {
+                        val responseText = frame.readText()
+                        print(responseText)
+                        serverSession.sendForwarded(json, responseText, url)
+                    }
                 }
             }
         } catch (e: Exception) {

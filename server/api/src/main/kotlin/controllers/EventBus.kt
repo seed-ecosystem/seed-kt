@@ -48,6 +48,7 @@ class EventBus(
                     )
                     return
                 }
+                println("Message sent: ${event.message}")
                 if (forwardUrl == null) {
                     val websocketResponse = WebsocketResponseSerializable(response = ResponseSerializable(true))
                     session.sendSerialized(websocketResponse)
@@ -107,6 +108,7 @@ suspend fun handleBaseRequest(
 ) {
     when (baseRequest.type) {
         "send" -> {
+            println("форвард $forwardUrl, строка $jsonString")
             val request = try {
                 json.decodeFromString<SendRequest>(jsonString)
             } catch (_: Exception) {
