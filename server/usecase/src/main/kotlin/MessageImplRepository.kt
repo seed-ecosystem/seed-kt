@@ -1,3 +1,4 @@
+import controllers.MessagesRepository
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Base64

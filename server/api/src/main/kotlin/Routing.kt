@@ -3,13 +3,9 @@ import controllers.handleBaseRequest
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
-
-interface MessagesRepository {
-    suspend fun sendMessage(message: MessageSerializable): WebsocketResponseSerializable
-    suspend fun getMessagesByChatIdAndNonce(chatId: String, nonce: Long): List<MessageSerializable>
-}
 
 fun Route.messageStream(eventBus: EventBus, json: Json) = webSocket("/ws") {
     coroutineScope {

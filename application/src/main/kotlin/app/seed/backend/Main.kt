@@ -23,7 +23,7 @@ import kotlinx.serialization.json.Json
 import messageStream
 import org.jetbrains.exposed.sql.Database
 
-suspend fun main(): Unit = coroutineScope {
+suspend fun main() {
     val port = System.getenv("PORT")?.toIntOrNull() ?: 8171
     val databaseUrl = System.getenv("DATABASE_URL")
     val databaseUser = System.getenv("DATABASE_USER") ?: ""
@@ -46,23 +46,27 @@ suspend fun main(): Unit = coroutineScope {
     val subscriptionHandler = SubscriptionHandler(chatService)
     val eventBus = EventBus(chatService, subscriptionHandler, forwardingService)
 
-    val server = this.embeddedServer(CIO, host = "localhost", port = port){
-        installJson()
-        install(CORS) {
-            allowCredentials = true
-            anyHost()
-            allowHeader(HttpHeaders.ContentType)
-        }
-        install(PartialContent)
-        install(AutoHeadResponse)
-        install(DoubleReceive)
-        install(WebSockets) {
-            contentConverter = KotlinxWebsocketSerializationConverter(json)
-        }
+    coroutineScope {
+        val server = this.embeddedServer(CIO, host = "localhost", port = port) {
+            installJson()
+            install(CORS) {
+                allowCredentials = true
+                anyHost()
+                allowHeader(HttpHeaders.ContentType)
+            }
+            install(PartialContent)
+            install(AutoHeadResponse)
+            install(DoubleReceive)
+            install(WebSockets) {
+                contentConverter = KotlinxWebsocketSerializationConverter(json)
+                timeoutMillis = 60_1000 * 2
+            }
 
-        routing {
-            messageStream(eventBus, json)
+            routing {
+                messageStream(eventBus, json)
+            }
         }
+        server.start(wait = true)
     }
-    server.start(wait = true)
+    
 }
