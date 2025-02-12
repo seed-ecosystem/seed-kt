@@ -1,9 +1,5 @@
 package controllers
 
-import BaseEventResponseSerializable
-import ConnectEventSerializable
-import ResponseSerializable
-import WebsocketResponseSerializable
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.*
@@ -17,11 +13,11 @@ import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.consumeEach
+import kotlinx.coroutines.sync.*
 import kotlinx.serialization.json.Json
-import java.util.concurrent.ConcurrentHashMap
 
 class ForwardingService(private val json: Json) {
+    private val mutex: Mutex = Mutex()
     private val sessions: MutableMap<DefaultWebSocketServerSession, ConnectionsManager> = mutableMapOf()
 
     private val http = HttpClient(CIO) {
@@ -30,25 +26,25 @@ class ForwardingService(private val json: Json) {
         }
     }
 
-    private val connections =
-        ConcurrentHashMap<DefaultWebSocketServerSession, MutableMap<String, Pair<DefaultClientWebSocketSession, HttpClient>>>()
-    
     @OptIn(DelicateCoroutinesApi::class)
     suspend fun connect(
         url: String,
         server: DefaultWebSocketServerSession,
     ) {
-        val manager = sessions.computeIfAbsent(server) {
-            ConnectionsManager(server, http)
+        val manager = mutex.withLock {
+            sessions.computeIfAbsent(server) {
+                ConnectionsManager(json, server, http)
+            }
         }
         manager.connectOrThrow(url)
     }
 
     suspend fun closeAllConnections(server: DefaultWebSocketServerSession) {
-        val manager = sessions.computeIfAbsent(server) {
-            ConnectionsManager(server, http)
+        mutex.withLock {
+            val manager = sessions[server] ?: return
+            manager.close()
+            sessions.remove(server)
         }
-        manager.close()
     }
 
     suspend fun forward(
@@ -56,8 +52,10 @@ class ForwardingService(private val json: Json) {
         request: String,
         server: DefaultWebSocketServerSession
     ) {
-        val manager = sessions.computeIfAbsent(server) {
-            ConnectionsManager(server, http)
+        val manager = mutex.withLock {
+            sessions.computeIfAbsent(server) {
+                ConnectionsManager(json, server, http)
+            }
         }
         manager.forwardOrThrow(url, request)
     }

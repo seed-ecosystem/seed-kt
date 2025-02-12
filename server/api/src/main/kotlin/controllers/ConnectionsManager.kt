@@ -22,12 +22,16 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
 
 private typealias Server = DefaultWebSocketServerSession
 private typealias Connection = Deferred<Client?>
 private typealias Client = DefaultClientWebSocketSession
 
 class ConnectionsManager(
+    private val json: Json,
     private val server: Server,
     private val http: HttpClient,
 ) {
@@ -39,7 +43,7 @@ class ConnectionsManager(
             server.respondStatusOrThrow(status = false)
             return
         }
-        connectedUrls[url] = getConnection(server, http, url) {
+        connectedUrls[url] = getConnection(json, server, http, url) {
             mutex.withLock {
                 connectedUrls.remove(url)
             }
@@ -56,6 +60,7 @@ class ConnectionsManager(
             server.respondStatusOrThrow(status = false)
             return
         }
+        server.respondStatusOrThrow(status = true)
         runCatching {
             client.send(request)
         }.onFailure {
@@ -71,6 +76,7 @@ class ConnectionsManager(
 }
 
 private fun getConnection(
+    json: Json,
     server: Server,
     http: HttpClient,
     url: String,
@@ -82,7 +88,7 @@ private fun getConnection(
         scope = server,
         onOpen = connection::complete,
         onMessageOrThrow = { text ->
-            server.forwardOrThrow(text, url)
+            server.forwardOrThrow(json, url, text)
         },
         onCloseOrThrow = { 
             onClose()
@@ -99,10 +105,16 @@ private suspend fun Server.respondStatusOrThrow(status: Boolean) {
 }
 
 suspend fun Server.forwardOrThrow(
+    json: Json,
     url: String,
     string: String,
 ) {
-    val forward = ForwardWrapper(url = url, forward = string)
+    val json = try {
+        json.parseToJsonElement(string)
+    } catch (_: Exception) {
+        JsonObject(emptyMap())
+    }
+    val forward = ForwardWrapper(url = url, forward = json)
     sendSerialized(forward)
 } 
 

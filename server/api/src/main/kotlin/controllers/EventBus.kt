@@ -62,7 +62,11 @@ class EventBus(
             is PingEvent -> {
                 val status = ResponseSerializable(status = true)
                 val response = WebsocketResponseSerializable(response = status)
-                session.sendSerialized(response)
+                if (forwardUrl == null) {
+                    session.sendSerialized(response)
+                } else {
+                    session.sendForwarded(json, response, forwardUrl)
+                }
             }
             is SubscribeEvent -> {
                 println("Сабскрайб с форвард $forwardUrl пришел")
@@ -241,7 +245,7 @@ suspend inline fun <reified T> DefaultWebSocketServerSession.sendForwarded(
         }
     }
 
-    val forwardWrapper = ForwardWrapper(url = url, forward = parsedMessage.toString())
+    val forwardWrapper = ForwardWrapper(url = url, forward = parsedMessage)
     val wrappedJson = json.encodeToString(ForwardWrapper.serializer(), forwardWrapper)
     send(wrappedJson)
 } 
