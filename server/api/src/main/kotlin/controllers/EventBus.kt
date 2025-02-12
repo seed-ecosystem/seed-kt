@@ -129,6 +129,7 @@ suspend fun handleBaseRequest(
             val request = try {
                 json.decodeFromString<SubscribeRequest>(jsonString)
             } catch (e: Exception) {
+                println("ошибка парса сабскрайба")
                 println(e)
                 if (forwardUrl == null) {
                     session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
@@ -169,7 +170,8 @@ suspend fun handleBaseRequest(
             val forwardRequestString = json.encodeToString(websocketRequest.request)
             val forwardRequestType = try {
                 json.decodeFromString<BaseRequest>(forwardRequestString)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                println(e)
                 session.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
                 return
             }

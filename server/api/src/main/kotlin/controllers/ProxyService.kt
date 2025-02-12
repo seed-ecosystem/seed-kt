@@ -16,27 +16,14 @@ import io.ktor.serialization.kotlinx.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.consumeEach
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import java.util.concurrent.ConcurrentHashMap
 
 class ForwardingService(val json: Json) {
     private val connections =
-        ConcurrentHashMap<DefaultWebSocketServerSession, MutableMap<String, DefaultClientWebSocketSession>>()
-
-    private val client = HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(Json { explicitNulls = false })
-        }
-        install(WebSockets) {
-            contentConverter = KotlinxWebsocketSerializationConverter(json)
-        }
-    }
+        ConcurrentHashMap<DefaultWebSocketServerSession, MutableMap<String, Pair<DefaultClientWebSocketSession, HttpClient>>>()
     
     private var isPing = false
 
@@ -48,44 +35,50 @@ class ForwardingService(val json: Json) {
             )
             return
         }
-        
-        scope.launch {
-            try {
-                val clientSession = try {
-                    client.seedWebSocketSession(urlString = url, onClose = {
-                        serverSession.launch {
-                            handleDisconnect(url, serverSession, client)
-                        }
-                    })
-                } finally {
-                    serverSession.sendSerialized(
-                        WebsocketResponseSerializable(response = ResponseSerializable(true))
-                    )
-                }
-                
-                connections.computeIfAbsent(serverSession) { mutableMapOf() }[url] = clientSession
-
-                serverSession.launch {
-                    clientSession.incoming.consumeEach { frame ->
-                        if (frame is Frame.Text) {
-                            if (!isPing){
-                                val responseText = frame.readText()
-                                print(responseText)
-                                serverSession.sendForwarded(json, responseText, url)
-                            }
-                            isPing = false
-                        }
-                    }
-                }
-                
-            } catch (e: Exception) {
-                println(e)
-                handleDisconnect(url, serverSession, client)
+        val client = HttpClient(CIO) {
+            install(ContentNegotiation) {
+                json(Json { explicitNulls = false })
+            }
+            install(WebSockets) {
+                contentConverter = KotlinxWebsocketSerializationConverter(json)
             }
         }
+        try {
+            val clientSession = try {
+                client.seedWebSocketSession(urlString = url, onClose = {
+                    serverSession.launch {
+                        handleDisconnect(url, serverSession, client)
+                    }
+                })
+            } finally {
+                serverSession.sendSerialized(
+                    WebsocketResponseSerializable(response = ResponseSerializable(true))
+                )
+            }
+            
+            connections.computeIfAbsent(serverSession) { mutableMapOf() }[url] = clientSession to client
+            println("Сессия с $url добавлена")
+            scope.launch {
+                serverSession.launch {
+                    clientSession.incoming.consumeEach { frame ->
+                        if (frame is Frame.Text && !isPing) {
+                            val responseText = frame.readText()
+                            print(responseText)
+                            serverSession.sendForwarded(json, responseText, url)
+                        }
+                        isPing = false
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            println(e)
+            handleDisconnect(url, serverSession, client)
+        }
+        
     }
 
     suspend fun handleDisconnect(url: String, serverSession: DefaultWebSocketServerSession, client: HttpClient) {
+        println("disconnect")
         serverSession.sendSerialized(
             BaseEventResponseSerializable(
                 "event",
@@ -93,24 +86,24 @@ class ForwardingService(val json: Json) {
             )
         )
         connections[serverSession]?.remove(url)
+        client.close()
+        client.cancel()
     }
     
     suspend fun closeAllConnections(serverSession: DefaultWebSocketServerSession) {
         try {
             connections[serverSession]?.let { urlClientMap ->
                 urlClientMap.forEach { (_, clientSession) ->
-                    clientSession.close()
-                    clientSession.cancel()
+                    clientSession.first.close()
+                    clientSession.first.cancel()
+                    clientSession.second.close()
+                    clientSession.second.cancel()
                 }
                 connections.remove(serverSession)
             }
-            client.close()
-            client.cancel()
         } catch (e: Exception) {
             println("CloseAllConnection")
             println(e)
-            client.close()
-            client.cancel()
         }
         
     }
@@ -119,13 +112,13 @@ class ForwardingService(val json: Json) {
         val clientSession = connections[serverSession]?.get(url)
         if (clientSession == null) {
             println(connections[serverSession])
-            println(url)
+            println("сессии не существует")
             serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(false)))
             return
         }
-        println(url)
         try {
-            clientSession.send(request)
+            clientSession.first.send(request)
+            serverSession.sendSerialized(WebsocketResponseSerializable(response = ResponseSerializable(true)))
             println("отправлено")
         } catch (e: Exception) {
             println("mem")
@@ -140,7 +133,7 @@ class ForwardingService(val json: Json) {
         try {
             connections[serverSession]?.forEach { (_, clientSession) ->
                 isPing = true
-                clientSession.send(Frame.Text("""{"type":"ping"}"""))
+                clientSession.first.send(Frame.Text("""{"type":"ping"}"""))
             }
         } finally {
             if (forwardUrl == null) {
