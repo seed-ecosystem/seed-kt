@@ -61,7 +61,7 @@ data class PingRequest(
 data class ForwardWrapper(
     val type: String = "forward",
     val url: String,
-    val forward: JsonElement
+    val forward: String,
 )
 //Events Response
 

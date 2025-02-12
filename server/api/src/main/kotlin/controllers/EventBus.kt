@@ -60,14 +60,9 @@ class EventBus(
                 subscriptionHandler.notifySubscribers(event.queueId, event.message, json, forwardUrl)
             }
             is PingEvent -> {
-                if (forwardUrl == null) {
-                    forwardingService.pingAllConnections(session)
-                } else if (Url(forwardUrl).host + Url(forwardUrl).fullPath == "meetacy.app/seed-kt") {
-                    val websocketResponse = WebsocketResponseSerializable(response = ResponseSerializable(true))
-                    session.sendSerialized(websocketResponse)
-                } else {
-                    forwardingService.pingAllConnections(session, forwardUrl)
-                }
+                val status = ResponseSerializable(status = true)
+                val response = WebsocketResponseSerializable(response = status)
+                session.sendSerialized(response)
             }
             is SubscribeEvent -> {
                 println("Сабскрайб с форвард $forwardUrl пришел")
@@ -82,7 +77,7 @@ class EventBus(
                 subscriptionHandler.subscribe(session, event.queueId, event.nonce, json, forwardUrl)
             }
             is ConnectEvent -> {
-                forwardingService.connect(event.url, session, scope)
+                forwardingService.connect(event.url, session)
             }
             is ForwardEvent -> {
                 forwardingService.forward(event.url, event.request, session)
@@ -246,7 +241,7 @@ suspend inline fun <reified T> DefaultWebSocketServerSession.sendForwarded(
         }
     }
 
-    val forwardWrapper = ForwardWrapper(url = url, forward = parsedMessage)
+    val forwardWrapper = ForwardWrapper(url = url, forward = parsedMessage.toString())
     val wrappedJson = json.encodeToString(ForwardWrapper.serializer(), forwardWrapper)
     send(wrappedJson)
 } 
